@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>내 주변 맛집</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>내 주변 맛집</h1>
+    <button id="locate-btn">내 위치 찾기</button>
+  </header>
+
+  <!-- 왼쪽: 검색 조건 + 목록 / 오른쪽: 지도 -->
+  <main>
+    <aside id="sidebar">
+      <!-- 검색 조건: 반경 + 종류 (위에 고정) -->
+      <div id="controls">
+        <select id="radius-select" aria-label="검색 반경">
+          <option value="500">500m</option>
+          <option value="1000" selected>1km</option>
+          <option value="2000">2km</option>
+          <option value="3000">3km</option>
+        </select>
+        <!-- 종류 버튼들은 app.js의 FILTERS 목록으로 만들어 넣는다 -->
+        <div id="filter-chips"></div>
+      </div>
+
+      <!-- 현재 상태(위치 찾는 중, 오류 등)를 보여주는 영역 -->
+      <p id="status">지도를 불러오는 중...</p>
+
+      <!-- 검색된 음식점 목록 (이 영역만 스크롤) -->
+      <ul id="place-list"></ul>
+    </aside>
+
+    <!-- 카카오 지도 + 그 위에 떠 있는 재검색 버튼 -->
+    <section id="map-wrap">
+      <div id="map"></div>
+      <button id="research-btn" hidden>이 지역에서 재검색</button>
+    </section>
+  </main>
+
+  <!-- 순서 중요: 설정(키) → 앱 코드. 카카오 SDK는 app.js가 키를 읽은 뒤 동적으로 불러옵니다. -->
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

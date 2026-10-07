@@ -1,0 +1,211 @@
+* { box-sizing: border-box; }
+
+/* 화면 전체를 앱처럼 사용: 페이지 자체는 스크롤하지 않고, 목록 영역만 스크롤 */
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column; /* 위: header / 아래: main */
+  font-family: system-ui, -apple-system, "Malgun Gothic", sans-serif;
+  background: #fafafa;
+  color: #222;
+}
+
+header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #fee500; /* 카카오 노랑 */
+}
+
+header h1 { margin: 0; font-size: 1.2rem; }
+
+button {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 8px;
+  background: #222;
+  color: #fff;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+button:disabled { opacity: 0.5; cursor: wait; }
+
+/* ─── 전체 레이아웃: 왼쪽 목록 | 오른쪽 지도 ─── */
+main {
+  flex: 1;          /* header를 뺀 나머지 높이를 모두 사용 */
+  min-height: 0;    /* flex 자식이 내용 때문에 늘어나지 않고 안쪽에서 스크롤되도록 */
+  display: flex;
+}
+
+#sidebar {
+  width: 380px;     /* 목록은 고정 폭 */
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #e5e5e5;
+  background: #fafafa;
+}
+
+#status {
+  margin: 0;
+  padding: 0 16px 10px;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+/* ─── 검색 조건 ─── */
+#controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px 10px;
+}
+
+#radius-select {
+  align-self: flex-start;
+  padding: 7px 8px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: #fff;
+}
+
+/* 사이드바 폭 안에서 종류 버튼을 여러 줄로 감싸기 */
+#filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border: 1px solid #ccc;
+  border-radius: 999px;
+  background: #fff;
+  color: #333;
+  font-size: 0.9rem;
+}
+
+.chip.active { background: #222; border-color: #222; color: #fff; }
+
+/* ─── 지도 ─── */
+#map-wrap {
+  flex: 1;          /* 목록을 뺀 나머지 폭을 모두 지도에 */
+  position: relative;
+}
+
+/* 지도 위 가운데 상단에 떠 있는 버튼 */
+#research-btn {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10; /* 지도보다 위에 표시 */
+  border-radius: 999px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+#research-btn[hidden] { display: none; }
+
+/* 지도는 높이가 없으면 보이지 않으므로 부모(map-wrap)를 꽉 채우게 지정 */
+#map {
+  position: absolute;
+  inset: 0;
+  background: #e5e5e5;
+}
+
+/* ─── 음식점 목록 ─── */
+#place-list {
+  flex: 1;
+  overflow-y: auto; /* 목록만 스크롤 */
+  list-style: none;
+  margin: 0;
+  padding: 0 16px 16px;
+}
+
+.place-item {
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  background: #fff;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+}
+
+.place-item:hover { background: #fffbe0; }
+
+/* 지도에서 선택된 음식점 */
+.place-item.active { border-color: #fee500; background: #fffbe0; }
+
+.place-name { margin: 0; font-size: 1rem; }
+.place-meta { margin: 4px 0 0; font-size: 0.85rem; color: #777; }
+
+.place-distance {
+  float: right;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #e67700;
+}
+
+/* ─── 상세 정보 (항목이 선택됐을 때만 보임) ─── */
+.place-detail { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; }
+.place-item.active .place-detail { display: block; }
+
+.place-detail dl {
+  display: grid;
+  grid-template-columns: 40px 1fr; /* 왼쪽: 항목명, 오른쪽: 값 */
+  gap: 4px 8px;
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.place-detail dt { color: #999; }
+.place-detail dd { margin: 0; }
+.place-detail a { color: #1a73e8; }
+
+.muted { color: #999; font-size: 0.85em; }
+
+.place-links { display: flex; gap: 8px; margin-top: 10px; }
+
+/* .place-detail a 의 파란 글자색보다 우선하도록 같은 범위로 선택 */
+.place-detail .link-btn {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  text-align: center;
+  text-decoration: none;
+  font-size: 0.875rem;
+  color: #333;
+  background: #fff;
+}
+
+.place-detail .link-btn.primary { background: #fee500; border-color: #fee500; font-weight: 600; }
+
+/* 지도 마커 위에 뜨는 말풍선 */
+.info-window { padding: 6px 10px; font-size: 0.85rem; white-space: nowrap; }
+
+/* ─── 좁은 화면(휴대폰): 위 지도 / 아래 목록 으로 쌓기 ─── */
+@media (max-width: 767px) {
+  main { flex-direction: column; }
+
+  #map-wrap {
+    order: -1;        /* HTML에서는 목록이 먼저지만, 화면에서는 지도를 위로 */
+    flex: none;
+    height: 45vh;
+  }
+
+  #sidebar {
+    width: auto;
+    flex: 1;
+    min-height: 0;
+    border-right: none;
+  }
+}
