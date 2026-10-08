@@ -14,12 +14,13 @@ const pickResultEl = document.getElementById("pick-result");
 // 햄버거 가게 판별: 카카오 분류가 두 갈래로 나뉘어 있다
 // - "음식점 > 양식 > 햄버거 > ..."           (수제버거 등)
 // - "음식점 > 패스트푸드 > 맥도날드/버거킹/..." (분류에 '햄버거' 단어가 없음, 단 샌드위치 가게는 제외)
+// - 써브웨이는 샌드위치지만 포함 ("음식점 > 패스트푸드 > 샌드위치 > 써브웨이")
 // 분류가 애매한 곳("음식점 > 양식")은 가게 이름에 '버거'가 있으면 포함
 function isBurger(place) {
   const c = place.category_name;
   return (
     c.includes("햄버거") ||
-    (c.startsWith("음식점 > 패스트푸드") && !c.includes("샌드위치")) ||
+    (c.startsWith("음식점 > 패스트푸드") && (!c.includes("샌드위치") || c.includes("써브웨이"))) ||
     place.place_name.includes("버거")
   );
 }
@@ -28,6 +29,7 @@ function isBurger(place) {
 // - category: 카테고리 검색 (FD6 = 음식점, CE7 = 카페)
 // - keyword:  음식점(FD6) 안에서 키워드 검색 → 받은 뒤 분류 이름에 keyword가 있는 것만 남긴다
 // - match:    (선택) 분류 이름만으로 거를 수 없을 때 쓰는 전용 판별 함수
+// - extraKeywords: (선택) 함께 검색해서 결과를 합칠 추가 키워드
 const FILTERS = [
   { label: "전체", category: "FD6" },
   { label: "한식", keyword: "한식" },
@@ -36,7 +38,7 @@ const FILTERS = [
   { label: "양식", keyword: "양식" },
   { label: "분식", keyword: "분식" },
   { label: "치킨", keyword: "치킨" },
-  { label: "햄버거", keyword: "햄버거", match: isBurger },
+  { label: "햄버거", keyword: "햄버거", extraKeywords: ["써브웨이"], match: isBurger },
   { label: "카페", category: "CE7" },
 ];
 
@@ -108,25 +110,19 @@ function showMyLocation({ lat, lng }) {
 
 // 장소 검색은 한 번에 15개씩, 최대 3페이지(45개)까지 준다.
 // 콜백 방식이라 Promise로 감싸고, 다음 페이지가 있으면 계속 받아서 합친다.
-function searchPlaces({ lat, lng }, radius, filter) {
-  const places = new kakao.maps.services.Places();
+// start: 콜백을 받아 실제 검색을 시작하는 함수 (카테고리 검색이든 키워드 검색이든)
+function fetchAllPages(start, logInfo) {
   const results = [];
 
-  const options = {
-    location: new kakao.maps.LatLng(lat, lng), // 검색 중심
-    radius,
-    sort: kakao.maps.services.SortBy.DISTANCE, // 가까운 순
-  };
-
   return new Promise((resolve, reject) => {
-    const callback = (data, status, pagination) => {
+    start((data, status, pagination) => {
       if (status === kakao.maps.services.Status.ZERO_RESULT) {
         resolve(results);
         return;
       }
       if (status !== kakao.maps.services.Status.OK) {
         // 원인 파악을 위해 개발자 도구(F12) 콘솔에 상세 정보를 남긴다
-        console.error("[장소 검색 실패]", { status, lat, lng, filter: filter.label, 받은개수: results.length });
+        console.error("[장소 검색 실패]", { status, ...logInfo, 받은개수: results.length });
 
         // 일부 페이지라도 받았다면 그것만이라도 보여준다
         if (results.length > 0) resolve(results);
@@ -140,22 +136,48 @@ function searchPlaces({ lat, lng }, radius, filter) {
       } else {
         resolve(results);
       }
-    };
+    });
+  });
+}
 
-    if (filter.category) {
-      places.categorySearch(filter.category, callback, options);
-    } else {
-      // 키워드 검색 + 음식점 카테고리로 제한
-      places.keywordSearch(filter.keyword, callback, { ...options, category_group_code: "FD6" });
-    }
-  }).then((list) =>
-    // 키워드 검색은 메뉴 이름 등으로도 걸리므로(예: '치킨' → 베이커리),
-    // 분류 이름("음식점 > 치킨 > ...")에 키워드가 들어 있는 곳만 남긴다.
-    // 전용 판별 함수(match)가 있으면 그것을 대신 쓴다.
-    filter.keyword
-      ? list.filter(filter.match ?? ((p) => p.category_name.includes(filter.keyword)))
-      : list
+async function searchPlaces({ lat, lng }, radius, filter) {
+  const options = {
+    location: new kakao.maps.LatLng(lat, lng), // 검색 중심
+    radius,
+    sort: kakao.maps.services.SortBy.DISTANCE, // 가까운 순
+  };
+
+  if (filter.category) {
+    const places = new kakao.maps.services.Places();
+    return fetchAllPages(
+      (cb) => places.categorySearch(filter.category, cb, options),
+      { lat, lng, filter: filter.label }
+    );
+  }
+
+  // 키워드 검색 + 음식점 카테고리로 제한.
+  // extraKeywords가 있으면 그 키워드로도 동시에 검색해서 결과를 합친다.
+  // (예: '햄버거'로 검색하면 써브웨이가 안 나오므로 '써브웨이'로도 검색)
+  const keywords = [filter.keyword, ...(filter.extraKeywords ?? [])];
+  const lists = await Promise.all(
+    keywords.map((keyword) => {
+      const places = new kakao.maps.services.Places(); // 검색마다 따로 만들어 서로 섞이지 않게
+      return fetchAllPages(
+        (cb) => places.keywordSearch(keyword, cb, { ...options, category_group_code: "FD6" }),
+        { lat, lng, keyword }
+      );
+    })
   );
+
+  // 합치기: 같은 가게가 두 검색에 모두 나올 수 있으므로 장소 ID로 중복 제거 → 다시 가까운 순 정렬
+  const byId = new Map();
+  lists.flat().forEach((p) => byId.set(p.id, p));
+  const merged = [...byId.values()].sort((a, b) => Number(a.distance) - Number(b.distance));
+
+  // 키워드 검색은 메뉴 이름 등으로도 걸리므로(예: '치킨' → 베이커리),
+  // 분류 이름("음식점 > 치킨 > ...")에 키워드가 들어 있는 곳만 남긴다.
+  // 전용 판별 함수(match)가 있으면 그것을 대신 쓴다.
+  return merged.filter(filter.match ?? ((p) => p.category_name.includes(filter.keyword)));
 }
 
 // ─── 4. 검색 결과 표시 (마커 + 목록) ─────────────────────────────
@@ -362,7 +384,8 @@ async function runSearch() {
     if (seq !== searchSeq) return; // 그 사이 새 검색이 시작됨 → 이 결과는 버림
 
     renderPlaces(places);
-    const capped = places.length >= MAX_RESULTS ? " (가까운 순 최대 45곳)" : "";
+    // 검색 한 번에 최대 45곳까지만 오므로, 그 이상이면 먼 곳은 빠져 있을 수 있다
+    const capped = places.length >= MAX_RESULTS ? " (가까운 곳 위주로 일부만 표시)" : "";
     setStatus(`${centerLabel} 반경 ${formatRadius(radius)} · ${filter.label} ${places.length}곳${capped}`);
   } catch (err) {
     if (seq === searchSeq) setStatus(err.message);
