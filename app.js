@@ -11,9 +11,23 @@ const researchBtn = document.getElementById("research-btn");
 const pickBtn = document.getElementById("pick-btn");
 const pickResultEl = document.getElementById("pick-result");
 
+// 햄버거 가게 판별: 카카오 분류가 두 갈래로 나뉘어 있다
+// - "음식점 > 양식 > 햄버거 > ..."           (수제버거 등)
+// - "음식점 > 패스트푸드 > 맥도날드/버거킹/..." (분류에 '햄버거' 단어가 없음, 단 샌드위치 가게는 제외)
+// 분류가 애매한 곳("음식점 > 양식")은 가게 이름에 '버거'가 있으면 포함
+function isBurger(place) {
+  const c = place.category_name;
+  return (
+    c.includes("햄버거") ||
+    (c.startsWith("음식점 > 패스트푸드") && !c.includes("샌드위치")) ||
+    place.place_name.includes("버거")
+  );
+}
+
 // 종류 필터 목록
 // - category: 카테고리 검색 (FD6 = 음식점, CE7 = 카페)
 // - keyword:  음식점(FD6) 안에서 키워드 검색 → 받은 뒤 분류 이름에 keyword가 있는 것만 남긴다
+// - match:    (선택) 분류 이름만으로 거를 수 없을 때 쓰는 전용 판별 함수
 const FILTERS = [
   { label: "전체", category: "FD6" },
   { label: "한식", keyword: "한식" },
@@ -22,6 +36,7 @@ const FILTERS = [
   { label: "양식", keyword: "양식" },
   { label: "분식", keyword: "분식" },
   { label: "치킨", keyword: "치킨" },
+  { label: "햄버거", keyword: "햄버거", match: isBurger },
   { label: "카페", category: "CE7" },
 ];
 
@@ -135,8 +150,11 @@ function searchPlaces({ lat, lng }, radius, filter) {
     }
   }).then((list) =>
     // 키워드 검색은 메뉴 이름 등으로도 걸리므로(예: '치킨' → 베이커리),
-    // 분류 이름("음식점 > 치킨 > ...")에 키워드가 들어 있는 곳만 남긴다
-    filter.keyword ? list.filter((p) => p.category_name.includes(filter.keyword)) : list
+    // 분류 이름("음식점 > 치킨 > ...")에 키워드가 들어 있는 곳만 남긴다.
+    // 전용 판별 함수(match)가 있으면 그것을 대신 쓴다.
+    filter.keyword
+      ? list.filter(filter.match ?? ((p) => p.category_name.includes(filter.keyword)))
+      : list
   );
 }
 
