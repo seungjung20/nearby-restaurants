@@ -15,6 +15,16 @@
   <!-- 왼쪽: 검색 조건 + 목록 / 오른쪽: 지도 -->
   <main>
     <aside id="sidebar">
+      <!-- 공유 링크로 들어왔을 때만 보이는 안내 -->
+      <div id="shared-banner" hidden>
+        <p>🔗 공유받은 즐겨찾기 <strong id="shared-count"></strong>곳</p>
+        <div class="shared-actions">
+          <button id="import-btn">내 즐겨찾기에 추가</button>
+          <button id="close-shared-btn" class="secondary">닫기</button>
+        </div>
+        <p id="shared-msg" hidden></p>
+      </div>
+
       <!-- 검색 조건: 반경 + 종류 (위에 고정) -->
       <div id="controls">
         <select id="radius-select" aria-label="검색 반경">
@@ -31,6 +41,14 @@
       <div id="pick-box">
         <button id="pick-btn" disabled>🎲 오늘 뭐 먹지?</button>
         <p id="pick-result" hidden></p>
+      </div>
+
+      <!-- 즐겨찾기 화면에서만 보이는 공유 버튼 -->
+      <div id="share-box" hidden>
+        <button id="share-btn">🔗 즐겨찾기 공유 링크 복사</button>
+        <p id="share-msg" hidden></p>
+        <!-- 클립보드 복사가 막힌 브라우저에서는 여기서 직접 복사 -->
+        <input id="share-url" type="text" readonly hidden aria-label="공유 링크" />
       </div>
 
       <!-- 현재 상태(위치 찾는 중, 오류 등)를 보여주는 영역 -->

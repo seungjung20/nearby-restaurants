@@ -10,6 +10,15 @@ const chipsEl = document.getElementById("filter-chips");
 const researchBtn = document.getElementById("research-btn");
 const pickBtn = document.getElementById("pick-btn");
 const pickResultEl = document.getElementById("pick-result");
+const shareBox = document.getElementById("share-box");
+const shareBtn = document.getElementById("share-btn");
+const shareMsgEl = document.getElementById("share-msg");
+const shareUrlInput = document.getElementById("share-url");
+const sharedBanner = document.getElementById("shared-banner");
+const sharedCountEl = document.getElementById("shared-count");
+const sharedMsgEl = document.getElementById("shared-msg");
+const importBtn = document.getElementById("import-btn");
+const closeSharedBtn = document.getElementById("close-shared-btn");
 
 // 햄버거 가게 판별: 카카오 분류가 두 갈래로 나뉘어 있다
 // - "음식점 > 양식 > 햄버거 > ..."           (수제버거 등)
@@ -40,6 +49,7 @@ const FILTERS = [
   { label: "치킨", keyword: "치킨" },
   { label: "햄버거", keyword: "햄버거", extraKeywords: ["써브웨이"], match: isBurger },
   { label: "카페", category: "CE7" },
+  { label: "★ 즐겨찾기", favorites: true }, // 검색하지 않고 저장해 둔 곳을 보여준다
 ];
 
 const MAX_RESULTS = 45; // 카카오 장소 검색이 주는 최대 개수 (15개 × 3페이지)
@@ -180,6 +190,185 @@ async function searchPlaces({ lat, lng }, radius, filter) {
   return merged.filter(filter.match ?? ((p) => p.category_name.includes(filter.keyword)));
 }
 
+// ─── 즐겨찾기 (브라우저 localStorage에 저장) ─────────────────────
+
+// localStorage: 브라우저에 문자열을 "키 → 값"으로 저장하는 공간.
+// 새로고침이나 재부팅 후에도 남지만, 이 브라우저(이 기기)에서만 보인다.
+const FAVORITES_KEY = "lunch-finder:favorites";
+
+// 장소 ID → 장소 정보. Map을 쓰면 "이미 즐겨찾기했나?"를 바로 확인할 수 있다.
+const favorites = loadFavorites();
+
+function loadFavorites() {
+  try {
+    // 저장은 문자열만 되므로 JSON 문자열로 저장했다가 읽을 때 다시 객체로 바꾼다
+    const list = JSON.parse(localStorage.getItem(FAVORITES_KEY) ?? "[]");
+    return new Map(list.map((p) => [p.id, p]));
+  } catch {
+    // 저장 공간이 막혀 있거나(시크릿 모드 등) 내용이 깨진 경우: 빈 목록으로 시작
+    return new Map();
+  }
+}
+
+function saveFavorites() {
+  try {
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify([...favorites.values()]));
+  } catch {
+    setStatus("즐겨찾기를 저장하지 못했습니다. (브라우저 저장 공간을 쓸 수 없음)");
+  }
+}
+
+function isFavorite(place) {
+  return favorites.has(place.id);
+}
+
+// 즐겨찾기 추가/해제. 거리(distance)는 검색 위치마다 달라지므로 저장하지 않는다.
+function toggleFavorite(place) {
+  if (isFavorite(place)) {
+    favorites.delete(place.id);
+  } else {
+    const { id, place_name, category_name, road_address_name, address_name, phone, x, y } = place;
+    favorites.set(id, { id, place_name, category_name, road_address_name, address_name, phone, x, y });
+  }
+  saveFavorites();
+}
+
+// 두 좌표 사이의 직선 거리(m) — 하버사인 공식 (지구를 반지름 6371km 구로 보고 계산)
+function distanceMeters(a, b) {
+  const R = 6371000;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * R * Math.asin(Math.sqrt(h)));
+}
+
+// 장소 목록(즐겨찾기, 공유받은 목록)에 현재 검색 중심 기준 거리를 붙여 가까운 순으로
+function placesNear(list, center) {
+  return list
+    .map((p) => ({ ...p, distance: distanceMeters(center, { lat: Number(p.y), lng: Number(p.x) }) }))
+    .sort((a, b) => a.distance - b.distance);
+}
+
+// ─── 즐겨찾기 공유 링크 ──────────────────────────────────────────
+
+// 링크 안에 즐겨찾기 정보를 통째로 담는다. 서버 없이 공유할 수 있는 대신, 보낸 시점의 복사본이다.
+// 주소의 # 뒷부분(해시)은 서버로 전송되지 않으므로, 목록 내용이 GitHub 서버 기록에 남지 않는다.
+const SHARE_PREFIX = "#share=";
+const SHARE_MAX = 100; // 받은 링크에서 읽을 최대 개수 (비정상적으로 긴 링크 방지)
+
+// 목록 → 링크용 문자열
+// 1) 필요한 값만 배열로 압축 → 2) JSON 문자열 → 3) UTF-8 바이트 → 4) base64url (주소에 넣어도 안전한 문자만)
+function encodeShare(list) {
+  const rows = list.map((p) => [
+    p.id,
+    p.place_name,
+    p.category_name,
+    p.road_address_name || p.address_name,
+    p.phone || "",
+    Number(p.x).toFixed(6), // 좌표는 소수점 6자리(약 10cm)면 충분
+    Number(p.y).toFixed(6),
+  ]);
+  const bytes = new TextEncoder().encode(JSON.stringify({ v: 1, p: rows }));
+  let binary = "";
+  bytes.forEach((b) => (binary += String.fromCharCode(b)));
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// 링크용 문자열 → 목록. 남이 만든 링크일 수 있으므로 형식을 꼼꼼히 확인하고, 이상하면 null.
+function decodeShare(encoded) {
+  try {
+    const base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const data = JSON.parse(new TextDecoder().decode(bytes));
+    if (data?.v !== 1 || !Array.isArray(data.p)) return null;
+
+    const isText = (s) => typeof s === "string" && s.length <= 200;
+    const list = data.p
+      .slice(0, SHARE_MAX)
+      .filter(
+        (r) =>
+          Array.isArray(r) &&
+          /^\d+$/.test(r[0]) && // 카카오 장소 ID는 숫자 (링크 주소에 들어가므로 엄격하게)
+          [r[1], r[2], r[3], r[4]].every(isText) &&
+          Number.isFinite(Number(r[5])) &&
+          Number.isFinite(Number(r[6]))
+      )
+      .map(([id, place_name, category_name, address, phone, x, y]) => ({
+        id, place_name, category_name, phone,
+        road_address_name: address,
+        address_name: address,
+        x: String(x),
+        y: String(y),
+      }));
+    return list.length > 0 ? list : null;
+  } catch {
+    return null; // base64나 JSON이 깨진 링크
+  }
+}
+
+// 공유 링크로 열었을 때 보여줄 목록 (필터 칩에는 없는 특별한 보기)
+let sharedPlaces = [];
+const SHARED_FILTER = { label: "공유받은 목록", shared: true };
+
+function readSharedFromUrl() {
+  if (!location.hash.startsWith(SHARE_PREFIX)) return null;
+  return decodeShare(location.hash.slice(SHARE_PREFIX.length));
+}
+
+// 주소창에서 #share=... 를 지운다 (새로고침해도 다시 공유 화면이 뜨지 않게).
+// replaceState는 페이지를 새로 불러오지 않고 주소만 바꾼다.
+function clearShareHash() {
+  if (location.hash.startsWith(SHARE_PREFIX)) {
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+}
+
+function enterSharedView(list) {
+  sharedPlaces = list;
+  search.filter = SHARED_FILTER;
+  chipsEl.querySelector(".active")?.classList.remove("active"); // 어떤 필터 칩도 선택 안 된 상태
+  sharedCountEl.textContent = list.length;
+  sharedMsgEl.hidden = true;
+  importBtn.disabled = false;
+}
+
+async function copyShareLink() {
+  const url = location.origin + location.pathname + SHARE_PREFIX + encodeShare([...favorites.values()]);
+  try {
+    await navigator.clipboard.writeText(url);
+    shareMsgEl.textContent = `링크를 복사했어요 (${favorites.size}곳). 카톡 등에 붙여넣어 보내세요.`;
+    shareUrlInput.hidden = true;
+  } catch {
+    // 클립보드 권한이 막힌 경우: 링크를 직접 보여주고 선택해 두기
+    shareMsgEl.textContent = "자동 복사가 막혀 있어요. 아래 링크를 복사해 주세요.";
+    shareUrlInput.value = url;
+    shareUrlInput.hidden = false;
+    shareUrlInput.select();
+  }
+  shareMsgEl.hidden = false;
+}
+
+function importShared() {
+  let added = 0;
+  sharedPlaces.forEach((p) => {
+    if (!isFavorite(p)) {
+      toggleFavorite(p); // 없는 것만 추가
+      added++;
+    }
+  });
+  const skipped = sharedPlaces.length - added;
+  sharedMsgEl.textContent =
+    added > 0
+      ? `${added}곳을 내 즐겨찾기에 추가했어요.` + (skipped > 0 ? ` (이미 있던 ${skipped}곳 제외)` : "")
+      : "모두 이미 내 즐겨찾기에 있어요.";
+  sharedMsgEl.hidden = false;
+  importBtn.disabled = true;
+  runSearch(); // ☆ → ★ 표시 갱신
+}
+
 // ─── 4. 검색 결과 표시 (마커 + 목록) ─────────────────────────────
 
 function clearPlaces() {
@@ -280,6 +469,7 @@ function renderPlaces(places) {
     const item = document.createElement("li");
     item.className = "place-item";
     item.innerHTML = `
+      <button class="fav-btn" aria-label="즐겨찾기"></button>
       <span class="place-distance">${formatDistance(place.distance)}</span>
       <p class="place-name">${escapeHtml(place.place_name)}</p>
       <p class="place-meta">${escapeHtml(shortCategory(place.category_name))} · ${escapeHtml(place.road_address_name || place.address_name)}</p>
@@ -287,9 +477,25 @@ function renderPlaces(places) {
     `;
     listEl.appendChild(item);
 
+    // ☆/★ 버튼: 누를 때마다 즐겨찾기 추가/해제하고 모양을 바꾼다
+    const favBtn = item.querySelector(".fav-btn");
+    const paintFav = () => {
+      const on = isFavorite(place);
+      favBtn.textContent = on ? "★" : "☆";
+      favBtn.classList.toggle("on", on);
+      favBtn.title = on ? "즐겨찾기 해제" : "즐겨찾기 추가";
+    };
+    paintFav();
+    favBtn.addEventListener("click", () => {
+      toggleFavorite(place);
+      // 즐겨찾기 화면에서 해제하면 목록에서 바로 빠지도록 다시 그린다
+      if (search.filter.favorites) runSearch();
+      else paintFav();
+    });
+
     item.addEventListener("click", (e) => {
-      // 상세 영역 안의 링크(전화, 상세보기, 길찾기)를 누른 건 항목 접기/펼치기로 취급하지 않음
-      if (e.target.closest("a")) return;
+      // 링크(전화, 상세보기, 길찾기)나 ☆ 버튼을 누른 건 항목 접기/펼치기로 취급하지 않음
+      if (e.target.closest("a, button")) return;
       selectPlace(place, marker, item);
     });
     kakao.maps.event.addListener(marker, "click", () => selectPlace(place, marker, item));
@@ -377,6 +583,35 @@ async function runSearch() {
   const { center, centerLabel, radius, filter } = search;
 
   researchBtn.hidden = true;
+  // 즐겨찾기·공유받은 목록은 반경과 상관없이 전부 보여준다
+  radiusSelect.disabled = Boolean(filter.favorites || filter.shared);
+  sharedBanner.hidden = !filter.shared;
+  shareMsgEl.hidden = true;
+  shareUrlInput.hidden = true;
+  if (!filter.shared) clearShareHash(); // 공유 화면을 벗어나면 주소창도 정리
+
+  // 즐겨찾기: 카카오 검색 없이 저장된 목록을 바로 그린다
+  if (filter.favorites) {
+    const places = placesNear([...favorites.values()], center);
+    renderPlaces(places);
+    shareBox.hidden = places.length === 0; // 공유할 게 있을 때만 공유 버튼
+    setStatus(
+      places.length > 0
+        ? `즐겨찾기 ${places.length}곳 · ${centerLabel} 기준 가까운 순`
+        : "아직 즐겨찾기한 곳이 없어요. 목록에서 ☆를 눌러 추가해 보세요."
+    );
+    return;
+  }
+  shareBox.hidden = true;
+
+  // 공유받은 목록: 링크에 담겨 온 장소들을 그린다
+  if (filter.shared) {
+    const places = placesNear(sharedPlaces, center);
+    renderPlaces(places);
+    setStatus(`공유받은 ${places.length}곳 · ${centerLabel} 기준 가까운 순`);
+    return;
+  }
+
   setStatus(`${filter.label} 검색 중...`);
 
   try {
@@ -415,6 +650,20 @@ function renderFilterChips() {
 function setupControls() {
   renderFilterChips();
   pickBtn.addEventListener("click", pickRandomPlace);
+
+  // 즐겨찾기 공유
+  shareBtn.addEventListener("click", copyShareLink);
+  importBtn.addEventListener("click", importShared);
+  closeSharedBtn.addEventListener("click", () => chipsEl.querySelector(".chip").click()); // '전체'로 돌아가기
+
+  // 이미 열려 있는 탭의 주소창에 공유 링크를 붙여넣은 경우(해시만 바뀜 → 새로고침 안 됨)
+  window.addEventListener("hashchange", () => {
+    const list = readSharedFromUrl();
+    if (list) {
+      enterSharedView(list);
+      runSearch();
+    }
+  });
 
   radiusSelect.addEventListener("change", () => {
     search.radius = Number(radiusSelect.value);
@@ -512,8 +761,17 @@ async function init() {
   setupControls();
   locateBtn.addEventListener("click", handleLocate);
 
-  // 페이지가 열리면 바로 내 위치를 한 번 찾아본다
-  handleLocate();
+  // 공유 링크로 들어왔다면 공유받은 목록 보기로 시작
+  const shared = readSharedFromUrl();
+  if (shared) enterSharedView(shared);
+  // 주소는 공유 링크 모양인데 내용을 못 읽었다면 깨진 링크 (검색하면서 주소가 정리되므로 미리 확인)
+  const brokenLink = !shared && location.hash.startsWith(SHARE_PREFIX);
+
+  // 페이지가 열리면 바로 내 위치를 한 번 찾아본다 (그 위치 기준으로 검색/거리 계산)
+  await handleLocate();
+
+  // handleLocate가 상태 문구를 덮어쓰므로 그 뒤에 알려준다
+  if (brokenLink) setStatus("공유 링크가 올바르지 않아 일반 검색으로 열었어요.");
 }
 
 init();
