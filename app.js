@@ -8,6 +8,8 @@ const listEl = document.getElementById("place-list");
 const radiusSelect = document.getElementById("radius-select");
 const chipsEl = document.getElementById("filter-chips");
 const researchBtn = document.getElementById("research-btn");
+const pickBtn = document.getElementById("pick-btn");
+const pickResultEl = document.getElementById("pick-result");
 
 // 종류 필터 목록
 // - category: 카테고리 검색 (FD6 = 음식점, CE7 = 카페)
@@ -28,7 +30,9 @@ const MAX_RESULTS = 45; // 카카오 장소 검색이 주는 최대 개수 (15�
 let map;              // 카카오 지도 객체
 let myMarker;         // 내 위치 마커
 let infoWindow;       // 마커 위 말풍선 (하나를 재사용)
-let placeMarkers = []; // 음식점 마커들 (다시 검색할 때 지우기 위해 보관)
+// 화면에 표시 중인 음식점들: { place, marker, item }
+// (다시 검색할 때 마커를 지우고, 랜덤 추천에서 하나를 고르기 위해 보관)
+let shownPlaces = [];
 
 // 현재 검색 조건 (화면에서 바뀌면 이 값을 고치고 runSearch()를 다시 부른다)
 const search = {
@@ -139,10 +143,11 @@ function searchPlaces({ lat, lng }, radius, filter) {
 // ─── 4. 검색 결과 표시 (마커 + 목록) ─────────────────────────────
 
 function clearPlaces() {
-  placeMarkers.forEach((marker) => marker.setMap(null)); // 지도에서 제거
-  placeMarkers = [];
+  shownPlaces.forEach(({ marker }) => marker.setMap(null)); // 지도에서 제거
+  shownPlaces = [];
   listEl.innerHTML = "";
   infoWindow?.close();
+  pickResultEl.hidden = true; // 목록이 바뀌면 이전 추천 결과도 숨김
 }
 
 // "음식점 > 한식 > 국밥" → "국밥" (가장 구체적인 분류만 표시)
@@ -230,7 +235,6 @@ function renderPlaces(places) {
     // 카카오 API는 x = 경도(lng), y = 위도(lat) 로 준다 (순서 주의!)
     const position = new kakao.maps.LatLng(place.y, place.x);
     const marker = new kakao.maps.Marker({ map, position, title: place.place_name });
-    placeMarkers.push(marker);
     bounds.extend(position);
 
     const item = document.createElement("li");
@@ -249,9 +253,63 @@ function renderPlaces(places) {
       selectPlace(place, marker, item);
     });
     kakao.maps.event.addListener(marker, "click", () => selectPlace(place, marker, item));
+
+    shownPlaces.push({ place, marker, item });
   });
 
   if (places.length > 0) map.setBounds(bounds);
+  pickBtn.disabled = places.length === 0; // 고를 게 없으면 추천 버튼 비활성화
+}
+
+// ─── 랜덤 메뉴 추천 ─────────────────────────────────────────────
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function randomItem(array) {
+  // Math.random(): 0 이상 1 미만의 실수 → 배열 길이를 곱하고 내림하면 0 ~ (길이-1) 사이의 정수
+  return array[Math.floor(Math.random() * array.length)];
+}
+
+async function pickRandomPlace() {
+  // 지금 보고 있는 목록을 기억해 둔다. 룰렛이 도는 사이 다시 검색되면 이 목록은 낡은 것이 된다.
+  const list = shownPlaces;
+  if (list.length === 0) return;
+
+  // 지금 펼쳐져 있는 곳은 후보에서 빼서, 연속으로 같은 곳이 뽑히지 않게 한다
+  const candidates = list.length > 1 ? list.filter(({ item }) => !item.classList.contains("active")) : list;
+  const picked = randomItem(candidates);
+
+  pickBtn.disabled = true;
+  pickResultEl.hidden = false;
+  pickResultEl.classList.add("spinning");
+
+  // 룰렛 연출: 이름을 빠르게 바꾸다가 점점 느려지게 (대기 시간을 조금씩 늘림)
+  const TICKS = 14;
+  for (let i = 0; i < TICKS; i++) {
+    // 룰렛이 도는 동안 필터 변경 등으로 목록이 바뀌었다면 중단하고 결과를 버린다
+    // (버튼 활성화 여부는 새 목록을 그린 renderPlaces가 정해 준다)
+    if (shownPlaces !== list) {
+      pickResultEl.classList.remove("spinning");
+      return;
+    }
+    pickResultEl.textContent = randomItem(list).place.place_name;
+    await sleep(40 + i * i * 2); // 40ms → 약 400ms 로 점점 느려짐
+  }
+  if (shownPlaces !== list) {
+    pickResultEl.classList.remove("spinning");
+    return;
+  }
+
+  pickResultEl.classList.remove("spinning");
+  pickResultEl.innerHTML =
+    `오늘은 <strong>${escapeHtml(picked.place.place_name)}</strong> 어때요?<br />` +
+    `<span class="muted">${escapeHtml(shortCategory(picked.place.category_name))} · ${formatDistance(picked.place.distance)}</span>`;
+
+  // 뽑힌 곳을 지도와 목록에서 펼쳐 보여준다 (이미 펼쳐진 상태면 selectPlace가 접어버리므로 먼저 확인)
+  if (!picked.item.classList.contains("active")) {
+    selectPlace(picked.place, picked.marker, picked.item);
+  }
+  pickBtn.disabled = false;
 }
 
 function formatRadius(meters) {
@@ -302,6 +360,7 @@ function renderFilterChips() {
 
 function setupControls() {
   renderFilterChips();
+  pickBtn.addEventListener("click", pickRandomPlace);
 
   radiusSelect.addEventListener("change", () => {
     search.radius = Number(radiusSelect.value);
