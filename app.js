@@ -383,56 +383,117 @@ function placesNear(list, center) {
 
 // 링크 안에 즐겨찾기 정보를 통째로 담는다. 서버 없이 공유할 수 있는 대신, 보낸 시점의 복사본이다.
 // 주소의 # 뒷부분(해시)은 서버로 전송되지 않으므로, 목록 내용이 GitHub 서버 기록에 남지 않는다.
-const SHARE_PREFIX = "#share=";
-const SHARE_MAX = 100; // 받은 링크에서 읽을 최대 개수 (비정상적으로 긴 링크 방지)
+//
+// 형식은 두 가지를 읽을 수 있다 (예전에 보낸 링크도 계속 열리도록):
+// - v2 "#s=..."     : 압축한 형식 (지금 만드는 링크)   — 10곳 기준 약 750자
+// - v1 "#share=..." : 압축하지 않은 예전 형식         — 10곳 기준 약 1,900자
+const SHARE_PREFIX = "#s=";
+const LEGACY_SHARE_PREFIX = "#share=";
+const SHARE_MAX = 100;             // 받은 링크에서 읽을 최대 개수 (비정상적으로 긴 링크 방지)
+const SHARE_MAX_BYTES = 200_000;   // 압축을 풀었을 때 허용할 최대 크기 (조작된 '압축 폭탄' 방지)
+const CATEGORY_ROOT = "음식점 > "; // 거의 모든 분류 앞에 붙는 부분 → 링크에서는 생략
 
-// 목록 → 링크용 문자열
-// 1) 필요한 값만 배열로 압축 → 2) JSON 문자열 → 3) UTF-8 바이트 → 4) base64url (주소에 넣어도 안전한 문자만)
-function encodeShare(list) {
-  const rows = list.map((p) => [
-    p.id,
-    p.place_name,
-    p.category_name,
-    p.road_address_name || p.address_name,
-    p.phone || "",
-    Number(p.x).toFixed(6), // 좌표는 소수점 6자리(약 10cm)면 충분
-    Number(p.y).toFixed(6),
-  ]);
-  const bytes = new TextEncoder().encode(JSON.stringify({ v: 1, p: rows }));
+function isShareHash() {
+  return location.hash.startsWith(SHARE_PREFIX) || location.hash.startsWith(LEGACY_SHARE_PREFIX);
+}
+
+// 바이트 ↔ base64url (주소에 넣어도 안전한 문자만: 영문, 숫자, -, _)
+function toBase64Url(bytes) {
   let binary = "";
   bytes.forEach((b) => (binary += String.fromCharCode(b)));
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-// 링크용 문자열 → 목록. 남이 만든 링크일 수 있으므로 형식을 꼼꼼히 확인하고, 이상하면 null.
-function decodeShare(encoded) {
-  try {
-    const base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
-    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-    const data = JSON.parse(new TextDecoder().decode(bytes));
-    if (data?.v !== 1 || !Array.isArray(data.p)) return null;
+function fromBase64Url(text) {
+  const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
+  return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+}
 
-    const isText = (s) => typeof s === "string" && s.length <= 200;
-    const list = data.p
-      .slice(0, SHARE_MAX)
-      .filter(
-        (r) =>
-          Array.isArray(r) &&
-          /^\d+$/.test(r[0]) && // 카카오 장소 ID는 숫자 (링크 주소에 들어가므로 엄격하게)
-          [r[1], r[2], r[3], r[4]].every(isText) &&
-          Number.isFinite(Number(r[5])) &&
-          Number.isFinite(Number(r[6]))
-      )
-      .map(([id, place_name, category_name, address, phone, x, y]) => ({
-        id, place_name, category_name, phone,
-        road_address_name: address,
-        address_name: address,
-        x: String(x),
-        y: String(y),
-      }));
+// 브라우저 내장 압축(deflate). 같은 동네 식당은 주소·분류에 겹치는 글자가 많아서 잘 줄어든다.
+async function deflate(text) {
+  const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+// 압축 풀기. 남이 만든 링크일 수 있으므로, 풀다가 너무 커지면 중단한다.
+async function inflate(bytes) {
+  const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > SHARE_MAX_BYTES) {
+      reader.cancel();
+      throw new Error("공유 데이터가 너무 큽니다.");
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(await new Blob(chunks).arrayBuffer());
+}
+
+// 목록 → 링크용 문자열 (v2)
+// 1) 필요한 값만 배열로 → 2) JSON 문자열 → 3) 압축 → 4) base64url
+async function encodeShare(list) {
+  const rows = list.map((p) => [
+    p.id,
+    p.place_name,
+    // "음식점 > 한식 > 국밥" → "한식 > 국밥". 드물게 다른 분류면 앞에 !를 붙여 그대로 둔다
+    p.category_name.startsWith(CATEGORY_ROOT) ? p.category_name.slice(CATEGORY_ROOT.length) : "!" + p.category_name,
+    p.road_address_name || p.address_name,
+    p.phone || "",
+    Number(p.x).toFixed(5), // 좌표는 소수점 5자리(약 1m)면 식당 위치로 충분
+    Number(p.y).toFixed(5),
+  ]);
+  return toBase64Url(await deflate(JSON.stringify({ v: 2, p: rows })));
+}
+
+// 링크 속 배열들 → 장소 목록. 남이 만든 링크일 수 있으므로 형식을 꼼꼼히 확인하고, 이상한 줄은 버린다.
+function rowsToPlaces(rows, version) {
+  const isText = (s) => typeof s === "string" && s.length <= 200;
+  return rows
+    .slice(0, SHARE_MAX)
+    .filter(
+      (r) =>
+        Array.isArray(r) &&
+        /^\d+$/.test(r[0]) && // 카카오 장소 ID는 숫자 (링크 주소에 들어가므로 엄격하게)
+        [r[1], r[2], r[3], r[4]].every(isText) &&
+        Number.isFinite(Number(r[5])) &&
+        Number.isFinite(Number(r[6]))
+    )
+    .map(([id, place_name, category, address, phone, x, y]) => ({
+      id, place_name, phone,
+      // v2는 생략했던 "음식점 > "를 다시 붙인다
+      category_name:
+        version === 1 ? category : category.startsWith("!") ? category.slice(1) : CATEGORY_ROOT + category,
+      road_address_name: address,
+      address_name: address,
+      x: String(x),
+      y: String(y),
+    }));
+}
+
+// 주소창의 공유 링크 → 장소 목록 (못 읽으면 null)
+async function readSharedFromUrl() {
+  try {
+    let data;
+    if (location.hash.startsWith(SHARE_PREFIX)) {
+      data = JSON.parse(await inflate(fromBase64Url(location.hash.slice(SHARE_PREFIX.length))));
+      if (data?.v !== 2) return null;
+    } else if (location.hash.startsWith(LEGACY_SHARE_PREFIX)) {
+      const bytes = fromBase64Url(location.hash.slice(LEGACY_SHARE_PREFIX.length));
+      data = JSON.parse(new TextDecoder().decode(bytes));
+      if (data?.v !== 1) return null;
+    } else {
+      return null;
+    }
+    if (!Array.isArray(data.p)) return null;
+
+    const list = rowsToPlaces(data.p, data.v);
     return list.length > 0 ? list : null;
   } catch {
-    return null; // base64나 JSON이 깨진 링크
+    return null; // base64·압축·JSON 중 하나라도 깨진 링크
   }
 }
 
@@ -440,15 +501,10 @@ function decodeShare(encoded) {
 let sharedPlaces = [];
 const SHARED_FILTER = { label: "공유받은 목록", shared: true };
 
-function readSharedFromUrl() {
-  if (!location.hash.startsWith(SHARE_PREFIX)) return null;
-  return decodeShare(location.hash.slice(SHARE_PREFIX.length));
-}
-
-// 주소창에서 #share=... 를 지운다 (새로고침해도 다시 공유 화면이 뜨지 않게).
+// 주소창에서 #s=... 를 지운다 (새로고침해도 다시 공유 화면이 뜨지 않게).
 // replaceState는 페이지를 새로 불러오지 않고 주소만 바꾼다.
 function clearShareHash() {
-  if (location.hash.startsWith(SHARE_PREFIX)) {
+  if (isShareHash()) {
     history.replaceState(null, "", location.pathname + location.search);
   }
 }
@@ -463,7 +519,7 @@ function enterSharedView(list) {
 }
 
 async function copyShareLink() {
-  const url = location.origin + location.pathname + SHARE_PREFIX + encodeShare([...favorites.values()]);
+  const url = location.origin + location.pathname + SHARE_PREFIX + (await encodeShare([...favorites.values()]));
   try {
     await navigator.clipboard.writeText(url);
     shareMsgEl.textContent = `링크를 복사했어요 (${favorites.size}곳). 카톡 등에 붙여넣어 보내세요.`;
@@ -836,8 +892,8 @@ function setupControls() {
   closeSharedBtn.addEventListener("click", () => chipsEl.querySelector(".chip").click()); // '전체'로 돌아가기
 
   // 이미 열려 있는 탭의 주소창에 공유 링크를 붙여넣은 경우(해시만 바뀜 → 새로고침 안 됨)
-  window.addEventListener("hashchange", () => {
-    const list = readSharedFromUrl();
+  window.addEventListener("hashchange", async () => {
+    const list = await readSharedFromUrl(); // 압축 풀기는 비동기라 기다린다
     if (list) {
       enterSharedView(list);
       runSearch();
@@ -951,16 +1007,17 @@ async function init() {
   locateBtn.addEventListener("click", handleLocate);
 
   // 공유 링크로 들어왔다면 공유받은 목록 보기로 시작
-  const shared = readSharedFromUrl();
+  const shared = await readSharedFromUrl(); // 압축 풀기는 비동기라 기다린다
   if (shared) enterSharedView(shared);
   // 주소는 공유 링크 모양인데 내용을 못 읽었다면 깨진 링크 (검색하면서 주소가 정리되므로 미리 확인)
-  const brokenLink = !shared && location.hash.startsWith(SHARE_PREFIX);
+  const brokenLink = !shared && isShareHash();
 
   // 페이지가 열리면 바로 내 위치를 한 번 찾아본다 (그 위치 기준으로 검색/거리 계산)
   await handleLocate();
 
   // handleLocate가 상태 문구를 덮어쓰므로 그 뒤에 알려준다
-  if (brokenLink) setStatus("공유 링크가 올바르지 않아 일반 검색으로 열었어요.");
+  // 가장 흔한 원인은 메신저 등에서 링크 뒷부분이 잘린 경우라 그걸 안내한다
+  if (brokenLink) setStatus("공유 링크를 읽지 못해 일반 검색으로 열었어요. 링크가 중간에 잘리지 않았는지 확인해 주세요.");
 }
 
 init();
