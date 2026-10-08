@@ -5,7 +5,7 @@ const locateBtn = document.getElementById("locate-btn");
 const statusEl = document.getElementById("status");
 const mapEl = document.getElementById("map");
 const listEl = document.getElementById("place-list");
-const radiusSelect = document.getElementById("radius-select");
+const radiusControl = document.getElementById("radius-control");
 const chipsEl = document.getElementById("filter-chips");
 const researchBtn = document.getElementById("research-btn");
 const pickBtn = document.getElementById("pick-btn");
@@ -19,6 +19,11 @@ const sharedCountEl = document.getElementById("shared-count");
 const sharedMsgEl = document.getElementById("shared-msg");
 const importBtn = document.getElementById("import-btn");
 const closeSharedBtn = document.getElementById("close-shared-btn");
+const detailPanel = document.getElementById("detail-panel");
+const detailTitleEl = document.getElementById("detail-title");
+const detailOpenLink = document.getElementById("detail-open");
+const detailFrame = document.getElementById("detail-frame");
+const detailCloseBtn = document.getElementById("detail-close");
 
 // 햄버거 가게 판별: 카카오 분류가 두 갈래로 나뉘어 있다
 // - "음식점 > 양식 > 햄버거 > ..."           (수제버거 등)
@@ -377,6 +382,29 @@ function clearPlaces() {
   listEl.innerHTML = "";
   infoWindow?.close();
   pickResultEl.hidden = true; // 목록이 바뀌면 이전 추천 결과도 숨김
+  closeDetail();              // 선택했던 식당이 목록에서 사라지므로 상세 패널도 닫음
+}
+
+// ─── 상세 정보 패널 ─────────────────────────────────────────────
+
+// 카카오맵 장소 페이지를 iframe으로 띄운다.
+// (공식 API가 아니라 카카오 페이지를 그대로 보여주는 방식이라, 카카오가 막으면 안 보일 수 있다
+//  → 그래서 '새 탭에서 열기' 링크를 항상 함께 둔다)
+function openDetail(place) {
+  const url = `https://place.map.kakao.com/${encodeURIComponent(place.id)}`;
+  detailTitleEl.textContent = place.place_name;
+  detailOpenLink.href = url;
+  if (detailFrame.src !== url) detailFrame.src = url; // 같은 곳이면 다시 불러오지 않음
+  detailPanel.hidden = false;
+  // 패널이 열리면 지도 폭이 줄어든다. ResizeObserver도 relayout하지만 그건 조금 뒤에 실행되므로,
+  // 바로 다음에 하는 지도 이동(panTo)이 새 크기 기준이 되도록 여기서 즉시 맞춘다.
+  map.relayout();
+}
+
+function closeDetail() {
+  detailPanel.hidden = true;
+  // 닫을 때 비워두면 다음에 열 때 이전 가게가 잠깐 보이는 일이 없다
+  detailFrame.removeAttribute("src");
 }
 
 // "음식점 > 한식 > 국밥" → "국밥" (가장 구체적인 분류만 표시)
@@ -395,16 +423,19 @@ function selectPlace(place, marker, itemEl) {
   if (itemEl.classList.contains("active")) {
     itemEl.classList.remove("active");
     infoWindow.close();
+    closeDetail();
     return;
   }
 
   infoWindow.setContent(`<div class="info-window">${escapeHtml(place.place_name)}</div>`);
   infoWindow.open(map, marker);
-  map.panTo(marker.getPosition());
 
   listEl.querySelector(".active")?.classList.remove("active");
   itemEl.classList.add("active"); // CSS에서 .active일 때만 상세 영역을 보여준다
   itemEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+  openDetail(place);
+  map.panTo(marker.getPosition()); // 패널이 열려 줄어든 지도 기준으로 가운데 이동
 }
 
 // 외부 데이터를 HTML에 넣기 전에 특수문자를 바꿔서 의도치 않은 태그 실행을 막는다.
@@ -419,12 +450,8 @@ function escapeHtml(text) {
 }
 
 // 상세 정보 영역 HTML (항목을 펼쳤을 때 보임)
+// 카카오맵 상세 페이지·길찾기는 오른쪽 상세 패널에서 보므로 여기에는 기본 정보만 둔다
 function detailHtml(place) {
-  const id = encodeURIComponent(place.id);
-  // 카카오맵 링크: 장소 ID만 있으면 상세 페이지 / 길찾기로 바로 연결된다
-  const detailUrl = `https://place.map.kakao.com/${id}`;
-  const routeUrl = `https://map.kakao.com/link/to/${id}`;
-
   // 전화번호: "02-123-4567" → tel:021234567 (휴대폰에서 누르면 바로 전화)
   const phone = place.phone
     ? `<a href="tel:${escapeHtml(place.phone.replace(/[^0-9+]/g, ""))}">${escapeHtml(place.phone)}</a>`
@@ -443,11 +470,6 @@ function detailHtml(place) {
         <dt>주소</dt><dd>${escapeHtml(place.road_address_name || place.address_name)}${jibun}</dd>
         <dt>전화</dt><dd>${phone}</dd>
       </dl>
-      <div class="place-links">
-        <!-- target="_blank": 새 탭에서 열기 / rel="noopener": 새 탭이 이 페이지를 조작하지 못하게 -->
-        <a class="link-btn" href="${detailUrl}" target="_blank" rel="noopener">카카오맵 상세보기</a>
-        <a class="link-btn primary" href="${routeUrl}" target="_blank" rel="noopener">길찾기</a>
-      </div>
     </div>
   `;
 }
@@ -488,9 +510,16 @@ function renderPlaces(places) {
     paintFav();
     favBtn.addEventListener("click", () => {
       toggleFavorite(place);
-      // 즐겨찾기 화면에서 해제하면 목록에서 바로 빠지도록 다시 그린다
-      if (search.filter.favorites) runSearch();
-      else paintFav();
+      if (search.filter.favorites) {
+        // 즐겨찾기 화면에서 해제하면 목록에서 바로 빠지도록 다시 그린다.
+        // 이때는 보던 위치를 유지해야 하므로 스크롤 위치를 기억했다가 되돌린다.
+        // (즐겨찾기 보기는 검색을 기다리지 않아서 runSearch()가 즉시 다시 그린다)
+        const scrollTop = listEl.scrollTop;
+        runSearch();
+        listEl.scrollTop = scrollTop;
+      } else {
+        paintFav();
+      }
     });
 
     item.addEventListener("click", (e) => {
@@ -505,6 +534,10 @@ function renderPlaces(places) {
 
   if (places.length > 0) map.setBounds(bounds);
   pickBtn.disabled = places.length === 0; // 고를 게 없으면 추천 버튼 비활성화
+
+  // 새 목록은 맨 위부터 보이게.
+  // (지우고 다시 채우는 게 한 번에 일어나서 브라우저가 이전 스크롤 위치를 그대로 유지하므로 직접 초기화)
+  listEl.scrollTop = 0;
 }
 
 // ─── 랜덤 메뉴 추천 ─────────────────────────────────────────────
@@ -583,8 +616,8 @@ async function runSearch() {
   const { center, centerLabel, radius, filter } = search;
 
   researchBtn.hidden = true;
-  // 즐겨찾기·공유받은 목록은 반경과 상관없이 전부 보여준다
-  radiusSelect.disabled = Boolean(filter.favorites || filter.shared);
+  // 즐겨찾기·공유받은 목록은 반경과 상관없이 전부 보여주므로 반경 버튼을 숨긴다
+  radiusControl.hidden = Boolean(filter.favorites || filter.shared);
   sharedBanner.hidden = !filter.shared;
   shareMsgEl.hidden = true;
   shareUrlInput.hidden = true;
@@ -651,6 +684,13 @@ function setupControls() {
   renderFilterChips();
   pickBtn.addEventListener("click", pickRandomPlace);
 
+  // 상세 패널 ✕: 펼쳐진 목록 항목도 함께 접는다
+  detailCloseBtn.addEventListener("click", () => {
+    listEl.querySelector(".active")?.classList.remove("active");
+    infoWindow?.close();
+    closeDetail();
+  });
+
   // 즐겨찾기 공유
   shareBtn.addEventListener("click", copyShareLink);
   importBtn.addEventListener("click", importShared);
@@ -665,8 +705,14 @@ function setupControls() {
     }
   });
 
-  radiusSelect.addEventListener("change", () => {
-    search.radius = Number(radiusSelect.value);
+  // 반경 버튼: 버튼마다 따로 연결하지 않고 묶음(radiusControl)에 한 번만 연결한다 (이벤트 위임)
+  radiusControl.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-radius]");
+    if (!btn || btn.classList.contains("active")) return; // 이미 선택된 반경이면 다시 검색하지 않음
+
+    radiusControl.querySelector(".active")?.classList.remove("active");
+    btn.classList.add("active");
+    search.radius = Number(btn.dataset.radius); // data-radius="2000" → btn.dataset.radius === "2000"
     runSearch();
   });
 

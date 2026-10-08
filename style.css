@@ -66,15 +66,6 @@ main {
   padding: 14px 16px 10px;
 }
 
-#radius-select {
-  align-self: flex-start;
-  padding: 7px 8px;
-  border: 1px solid #ccc;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  background: #fff;
-}
-
 /* 사이드바 폭 안에서 종류 버튼을 여러 줄로 감싸기 */
 #filter-chips {
   display: flex;
@@ -161,16 +152,62 @@ main {
 .shared-actions button.secondary { background: #fff; color: #333; border: 1px solid #ccc; }
 #shared-banner #shared-msg { margin-top: 6px; font-size: 0.85rem; color: #1a56b8; }
 
+/* ─── 상세 정보 패널 (목록과 지도 사이) ─── */
+#detail-panel {
+  width: 400px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #e5e5e5;
+  background: #fff;
+}
+
+/* display: flex를 지정했으므로 hidden일 때 숨김을 직접 지정해야 한다 */
+#detail-panel[hidden] { display: none; }
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eee;
+}
+
+/* 이름이 길면 말줄임(…) */
+#detail-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#detail-open { flex-shrink: 0; font-size: 0.8rem; color: #1a73e8; text-decoration: none; }
+
+#detail-close {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  background: none;
+  color: #666;
+  font-size: 1rem;
+}
+
+#detail-close:hover { background: #f0f0f0; }
+
+#detail-frame { flex: 1; width: 100%; border: 0; }
+
 /* ─── 지도 ─── */
 #map-wrap {
   flex: 1;          /* 목록을 뺀 나머지 폭을 모두 지도에 */
   position: relative;
 }
 
-/* 지도 위 가운데 상단에 떠 있는 버튼 */
+/* 지도 아래쪽 가운데에 떠 있는 버튼
+   (위쪽은 반경 버튼이 있어서, 상세 패널로 지도가 좁아지면 겹치므로 아래에 둔다.
+    bottom을 넉넉히 줘서 지도 왼쪽 아래의 카카오 로고·축척 표시와 겹치지 않게) */
 #research-btn {
   position: absolute;
-  top: 12px;
+  bottom: 32px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 10; /* 지도보다 위에 표시 */
@@ -179,6 +216,33 @@ main {
 }
 
 #research-btn[hidden] { display: none; }
+
+/* 지도 오른쪽 위에 떠 있는 반경 버튼 묶음 (붙어 있는 버튼들 = 세그먼트 컨트롤) */
+#radius-control {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+  display: flex;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  overflow: hidden; /* 안쪽 버튼의 모서리를 바깥 둥근 모서리에 맞춰 자름 */
+}
+
+#radius-control[hidden] { display: none; }
+
+#radius-control button {
+  padding: 7px 12px;
+  border-radius: 0;
+  background: #fff;
+  color: #333;
+  font-size: 0.85rem;
+}
+
+#radius-control button + button { border-left: 1px solid #e5e5e5; } /* 버튼 사이 구분선 */
+#radius-control button:hover { background: #f3f3f3; }
+#radius-control button.active { background: #222; color: #fff; font-weight: 600; }
 
 /* 지도는 높이가 없으면 보이지 않으므로 부모(map-wrap)를 꽉 채우게 지정 */
 #map {
@@ -252,23 +316,6 @@ main {
 .place-detail a { color: #1a73e8; }
 
 .muted { color: #999; font-size: 0.85em; }
-
-.place-links { display: flex; gap: 8px; margin-top: 10px; }
-
-/* .place-detail a 의 파란 글자색보다 우선하도록 같은 범위로 선택 */
-.place-detail .link-btn {
-  flex: 1;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  text-align: center;
-  text-decoration: none;
-  font-size: 0.875rem;
-  color: #333;
-  background: #fff;
-}
-
-.place-detail .link-btn.primary { background: #fee500; border-color: #fee500; font-weight: 600; }
 
 /* 지도 마커 위에 뜨는 말풍선 */
 .info-window { padding: 6px 10px; font-size: 0.85rem; white-space: nowrap; }

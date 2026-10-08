@@ -25,14 +25,8 @@
         <p id="shared-msg" hidden></p>
       </div>
 
-      <!-- 검색 조건: 반경 + 종류 (위에 고정) -->
+      <!-- 검색 조건: 종류 (위에 고정) -->
       <div id="controls">
-        <select id="radius-select" aria-label="검색 반경">
-          <option value="500">500m</option>
-          <option value="1000" selected>1km</option>
-          <option value="2000">2km</option>
-          <option value="3000">3km</option>
-        </select>
         <!-- 종류 버튼들은 app.js의 FILTERS 목록으로 만들어 넣는다 -->
         <div id="filter-chips"></div>
       </div>
@@ -58,10 +52,37 @@
       <ul id="place-list"></ul>
     </aside>
 
+    <!-- 가운데: 식당을 선택하면 열리는 카카오맵 상세 정보 -->
+    <section id="detail-panel" hidden>
+      <div class="detail-header">
+        <strong id="detail-title"></strong>
+        <a id="detail-open" target="_blank" rel="noopener">새 탭에서 열기 ↗</a>
+        <button id="detail-close" aria-label="상세 정보 닫기">✕</button>
+      </div>
+      <!--
+        sandbox: 안에 뜬 페이지가 할 수 있는 일을 제한한다.
+        - 허용: 스크립트 실행, 자기 사이트 쿠키 사용, 새 창 열기
+        - 미허용: 우리 페이지 자체를 다른 주소로 바꿔버리기(top navigation)
+      -->
+      <iframe
+        id="detail-frame"
+        title="카카오맵 상세 정보"
+        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      ></iframe>
+    </section>
+
     <!-- 카카오 지도 + 그 위에 떠 있는 재검색 버튼 -->
     <section id="map-wrap">
       <div id="map"></div>
       <button id="research-btn" hidden>이 지역에서 재검색</button>
+
+      <!-- 지도 오른쪽 위: 검색 반경 (data-radius 값은 미터) -->
+      <div id="radius-control" role="group" aria-label="검색 반경">
+        <button data-radius="500">500m</button>
+        <button data-radius="1000" class="active">1km</button>
+        <button data-radius="2000">2km</button>
+        <button data-radius="3000">3km</button>
+      </div>
     </section>
   </main>
 
