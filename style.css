@@ -317,8 +317,111 @@ main {
 
 .muted { color: #999; font-size: 0.85em; }
 
-/* 지도 마커 위에 뜨는 말풍선 */
-.info-window { padding: 6px 10px; font-size: 0.85rem; white-space: nowrap; }
+/* 같은 자리에 여러 식당이 있을 때의 묶음 마커: 숫자가 적힌 원
+   (yAnchor: 1 → 원의 아래쪽 끝이 좌표에 오도록. 일반 마커처럼 좌표 위에 서 있는 모양) */
+.group-marker {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.group-marker:hover { background: #1d4ed8; }
+
+/* 묶음 마커를 눌렀을 때 뜨는 식당 목록 팝업 */
+.group-popup {
+  position: relative;
+  bottom: 40px; /* 묶음 마커 위로 */
+  width: 240px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  font-size: 0.85rem;
+}
+
+.group-popup-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px 8px 12px;
+  border-bottom: 1px solid #eee;
+  font-weight: 600;
+}
+
+.group-popup-header span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.group-popup-close { padding: 2px 6px; background: none; color: #999; font-size: 0.85rem; }
+.group-popup-close:hover { background: #f0f0f0; color: #333; }
+
+.group-popup ul {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 220px; /* 식당이 많으면 팝업 안에서 스크롤 */
+  overflow-y: auto;
+}
+
+.group-popup li button {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: none;
+  color: #222;
+  font-size: 0.85rem;
+  text-align: left;
+}
+
+.group-popup li button:hover { background: #fffbe0; }
+.group-popup li button.active { background: #fee500; font-weight: 600; }
+.group-popup li .muted { flex-shrink: 0; }
+
+/* 선택한 식당 마커 위에 뜨는 이름표: [이름  ✕] 를 한 줄에 나란히 배치해 겹치지 않게 */
+.map-label {
+  position: relative;
+  bottom: 44px; /* 좌표(마커 아래 끝)에서 마커 머리 위까지 올림 */
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 4px 5px 12px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* 아래쪽 꼬리(▼) — 마커를 가리키도록 */
+.map-label::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #fff;
+  border-bottom: 0;
+}
+
+.map-label-close {
+  padding: 2px 6px;
+  background: none;
+  color: #999;
+  font-size: 0.85rem;
+}
+
+.map-label-close:hover { background: #f0f0f0; color: #333; }
 
 /* ─── 좁은 화면(휴대폰): 위 지도 / 아래 목록 으로 쌓기 ─── */
 @media (max-width: 767px) {

@@ -61,10 +61,17 @@ const MAX_RESULTS = 45; // 카카오 장소 검색이 주는 최대 개수 (15�
 
 let map;              // 카카오 지도 객체
 let myMarker;         // 내 위치 마커
-let infoWindow;       // 마커 위 말풍선 (하나를 재사용)
-// 화면에 표시 중인 음식점들: { place, marker, item }
+let placeLabel;       // 선택한 식당 마커 위에 뜨는 이름표 (하나를 재사용)
+// 화면에 표시 중인 음식점들: { place, position, item }
+// - position: 지도에서 이 식당을 가리키는 좌표 (같은 건물에 묶인 식당은 묶음 마커의 좌표)
 // (다시 검색할 때 마커를 지우고, 랜덤 추천에서 하나를 고르기 위해 보관)
 let shownPlaces = [];
+let mapItems = [];    // 지도에 올린 마커·묶음 마커들 (다시 검색할 때 지우기 위해 보관)
+let groupPopup;       // 묶음 마커를 눌렀을 때 뜨는 식당 목록 팝업 (하나를 재사용)
+
+// 이 거리(m) 안에 있는 식당들은 지도에서 마커 하나로 묶는다.
+// 카카오는 식당 위치를 건물 기준 좌표로 줘서, 같은 건물 식당은 아무리 확대해도 겹치기 때문.
+const GROUP_DISTANCE = 5;
 
 // 현재 검색 조건 (화면에서 바뀌면 이 값을 고치고 runSearch()를 다시 부른다)
 const search = {
@@ -106,6 +113,121 @@ function createMap({ lat, lng }) {
   // 카카오 지도는 처음 만들 때의 영역 크기를 기억한다.
   // 창 크기 변경 등으로 지도 영역 크기가 바뀌면 relayout()으로 다시 맞춰줘야 회색 빈 곳이 생기지 않는다.
   new ResizeObserver(() => map.relayout()).observe(mapEl);
+
+  placeLabel = createPlaceLabel();
+  groupPopup = new kakao.maps.CustomOverlay({ yAnchor: 1, zIndex: 20, clickable: true }); // 이름표(10)보다 위
+}
+
+// 선택한 식당 이름표: [식당 이름  ✕]
+// 카카오 기본 말풍선(InfoWindow)은 ✕가 이름을 가리고, ✕를 눌렀는지 알려주지 않아서
+// 직접 만든 HTML을 지도 위에 띄우는 CustomOverlay를 쓴다.
+function createPlaceLabel() {
+  const el = document.createElement("div");
+  el.className = "map-label";
+  el.innerHTML = `<span class="map-label-name"></span><button class="map-label-close" aria-label="선택 해제">✕</button>`;
+  el.querySelector(".map-label-close").addEventListener("click", deselectPlace);
+
+  return new kakao.maps.CustomOverlay({
+    content: el,
+    yAnchor: 1,      // 이름표의 아래쪽 끝을 좌표에 맞춤 (CSS로 마커 머리 위까지 올림)
+    zIndex: 10,      // 다른 마커들보다 위에
+    clickable: true, // 이름표를 클릭해도 지도 클릭/드래그로 넘어가지 않게
+  });
+}
+
+function showPlaceLabel(place, position) {
+  // textContent는 글자 그대로 넣으므로 escapeHtml이 필요 없다
+  placeLabel.getContent().querySelector(".map-label-name").textContent = place.place_name;
+  placeLabel.setPosition(position);
+  placeLabel.setMap(map);
+}
+
+function hidePlaceLabel() {
+  placeLabel?.setMap(null);
+}
+
+// 선택 해제: 목록 펼침, 지도 이름표, 상세 패널을 한꺼번에 닫는다
+// (목록 항목 다시 클릭, 이름표 ✕, 상세 패널 ✕ 모두 이 함수를 쓴다)
+function deselectPlace() {
+  listEl.querySelector(".active")?.classList.remove("active");
+  hidePlaceLabel();
+  hideGroupPopup();
+  closeDetail();
+}
+
+// ─── 같은 자리 식당 묶기 ─────────────────────────────────────────
+
+// 식당 목록 → [{ lat, lng, places: [...] }]  (GROUP_DISTANCE 안에 있는 식당끼리 한 묶음)
+function groupByPosition(places) {
+  const groups = [];
+  places.forEach((place) => {
+    const point = { lat: Number(place.y), lng: Number(place.x) };
+    const group = groups.find((g) => distanceMeters(g, point) <= GROUP_DISTANCE);
+    if (group) group.places.push(place);
+    else groups.push({ ...point, places: [place] });
+  });
+  return groups;
+}
+
+// 숫자가 적힌 묶음 마커 (예: ⑤). 누르면 그 자리 식당 목록 팝업을 연다.
+function createGroupMarker(position, entries) {
+  const el = document.createElement("button");
+  el.className = "group-marker";
+  el.textContent = entries.length;
+  el.title = entries.map(({ place }) => place.place_name).join(", "); // 마우스를 올리면 이름들
+  el.addEventListener("click", () => openGroupPopup(position, entries));
+
+  return new kakao.maps.CustomOverlay({ map, position, content: el, yAnchor: 1, zIndex: 2, clickable: true });
+}
+
+// 묶음 팝업: [주소 · N곳 ✕] + 식당 버튼 목록
+// 가게 이름 등 외부 데이터는 textContent로만 넣는다 (HTML로 해석되지 않음)
+function openGroupPopup(position, entries) {
+  const el = document.createElement("div");
+  el.className = "group-popup";
+
+  const header = document.createElement("div");
+  header.className = "group-popup-header";
+  const title = document.createElement("span");
+  const first = entries[0].place;
+  title.textContent = `${first.road_address_name || first.address_name} · ${entries.length}곳`;
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "group-popup-close";
+  closeBtn.textContent = "✕";
+  closeBtn.setAttribute("aria-label", "닫기");
+  closeBtn.addEventListener("click", hideGroupPopup);
+  header.append(title, closeBtn);
+
+  const list = document.createElement("ul");
+  entries.forEach((entry) => {
+    const btn = document.createElement("button");
+    const name = document.createElement("span");
+    name.textContent = entry.place.place_name;
+    const category = document.createElement("span");
+    category.className = "muted";
+    category.textContent = shortCategory(entry.place.category_name);
+    btn.append(name, category);
+    if (entry.item.classList.contains("active")) btn.classList.add("active"); // 지금 선택된 식당 표시
+
+    btn.addEventListener("click", () => {
+      hideGroupPopup();
+      // 이미 선택된 식당을 고르면 selectPlace가 '해제'해 버리므로 그때는 그대로 둔다
+      if (!entry.item.classList.contains("active")) selectPlace(entry.place, entry.position, entry.item);
+    });
+
+    const li = document.createElement("li");
+    li.append(btn);
+    list.append(li);
+  });
+
+  el.append(header, list);
+  groupPopup.setContent(el);
+  groupPopup.setPosition(position);
+  groupPopup.setMap(map);
+}
+
+function hideGroupPopup() {
+  groupPopup?.setMap(null);
 }
 
 // 지도 중심을 옮기고 내 위치 마커를 표시 (마커는 하나만 유지)
@@ -377,12 +499,14 @@ function importShared() {
 // ─── 4. 검색 결과 표시 (마커 + 목록) ─────────────────────────────
 
 function clearPlaces() {
-  shownPlaces.forEach(({ marker }) => marker.setMap(null)); // 지도에서 제거
+  mapItems.forEach((item) => item.setMap(null)); // 지도에서 마커·묶음 마커 제거
+  mapItems = [];
   shownPlaces = [];
+  hideGroupPopup();
   listEl.innerHTML = "";
-  infoWindow?.close();
   pickResultEl.hidden = true; // 목록이 바뀌면 이전 추천 결과도 숨김
-  closeDetail();              // 선택했던 식당이 목록에서 사라지므로 상세 패널도 닫음
+  hidePlaceLabel();           // 선택했던 식당이 목록에서 사라지므로 이름표와
+  closeDetail();              // 상세 패널도 닫음
 }
 
 // ─── 상세 정보 패널 ─────────────────────────────────────────────
@@ -417,25 +541,23 @@ function formatDistance(meters) {
   return m < 1000 ? `${m}m` : `${(m / 1000).toFixed(1)}km`;
 }
 
-// 마커나 목록 항목을 클릭했을 때: 말풍선 띄우고, 목록 항목을 펼쳐 상세 정보 표시
-function selectPlace(place, marker, itemEl) {
+// 마커나 목록 항목을 클릭했을 때: 이름표 띄우고, 목록 항목을 펼쳐 상세 정보 표시
+function selectPlace(place, position, itemEl) {
   // 이미 펼쳐진 항목을 다시 누르면 접는다
   if (itemEl.classList.contains("active")) {
-    itemEl.classList.remove("active");
-    infoWindow.close();
-    closeDetail();
+    deselectPlace();
     return;
   }
 
-  infoWindow.setContent(`<div class="info-window">${escapeHtml(place.place_name)}</div>`);
-  infoWindow.open(map, marker);
+  hideGroupPopup();
+  showPlaceLabel(place, position);
 
   listEl.querySelector(".active")?.classList.remove("active");
   itemEl.classList.add("active"); // CSS에서 .active일 때만 상세 영역을 보여준다
   itemEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
   openDetail(place);
-  map.panTo(marker.getPosition()); // 패널이 열려 줄어든 지도 기준으로 가운데 이동
+  map.panTo(position); // 패널이 열려 줄어든 지도 기준으로 가운데 이동
 }
 
 // 외부 데이터를 HTML에 넣기 전에 특수문자를 바꿔서 의도치 않은 태그 실행을 막는다.
@@ -476,17 +598,24 @@ function detailHtml(place) {
 
 function renderPlaces(places) {
   clearPlaces();
-  if (!infoWindow) infoWindow = new kakao.maps.InfoWindow({ removable: true });
 
   // 모든 마커가 화면에 들어오도록 범위를 계산 (검색 중심 포함)
   const bounds = new kakao.maps.LatLngBounds();
   bounds.extend(new kakao.maps.LatLng(search.center.lat, search.center.lng));
 
+  // 1) 같은 자리 식당끼리 묶고, 식당마다 지도에서 가리킬 좌표(묶음 좌표)를 정한다
+  //    (카카오 API는 x = 경도(lng), y = 위도(lat) 로 준다 — 순서 주의!)
+  const groups = groupByPosition(places);
+  const positionById = new Map();
+  groups.forEach((group) => {
+    group.position = new kakao.maps.LatLng(group.lat, group.lng);
+    group.places.forEach((place) => positionById.set(place.id, group.position));
+    bounds.extend(group.position);
+  });
+
+  // 2) 목록 항목 만들기 (가까운 순 그대로)
   places.forEach((place) => {
-    // 카카오 API는 x = 경도(lng), y = 위도(lat) 로 준다 (순서 주의!)
-    const position = new kakao.maps.LatLng(place.y, place.x);
-    const marker = new kakao.maps.Marker({ map, position, title: place.place_name });
-    bounds.extend(position);
+    const position = positionById.get(place.id);
 
     const item = document.createElement("li");
     item.className = "place-item";
@@ -525,11 +654,25 @@ function renderPlaces(places) {
     item.addEventListener("click", (e) => {
       // 링크(전화, 상세보기, 길찾기)나 ☆ 버튼을 누른 건 항목 접기/펼치기로 취급하지 않음
       if (e.target.closest("a, button")) return;
-      selectPlace(place, marker, item);
+      selectPlace(place, position, item);
     });
-    kakao.maps.event.addListener(marker, "click", () => selectPlace(place, marker, item));
 
-    shownPlaces.push({ place, marker, item });
+    shownPlaces.push({ place, position, item });
+  });
+
+  // 3) 지도에 마커 올리기: 혼자 있으면 일반 마커, 여럿이 겹치면 숫자 묶음 마커
+  const entryById = new Map(shownPlaces.map((entry) => [entry.place.id, entry]));
+  groups.forEach((group) => {
+    const entries = group.places.map((place) => entryById.get(place.id));
+
+    if (entries.length === 1) {
+      const { place, item } = entries[0];
+      const marker = new kakao.maps.Marker({ map, position: group.position, title: place.place_name });
+      kakao.maps.event.addListener(marker, "click", () => selectPlace(place, group.position, item));
+      mapItems.push(marker);
+    } else {
+      mapItems.push(createGroupMarker(group.position, entries));
+    }
   });
 
   if (places.length > 0) map.setBounds(bounds);
@@ -599,7 +742,7 @@ async function pickRandomPlace() {
 
   // 뽑힌 곳을 지도와 목록에서 펼쳐 보여준다 (이미 펼쳐진 상태면 selectPlace가 접어버리므로 먼저 확인)
   if (!picked.item.classList.contains("active")) {
-    selectPlace(picked.place, picked.marker, picked.item);
+    selectPlace(picked.place, picked.position, picked.item);
   }
   pickBtn.disabled = false;
 }
@@ -684,12 +827,8 @@ function setupControls() {
   renderFilterChips();
   pickBtn.addEventListener("click", pickRandomPlace);
 
-  // 상세 패널 ✕: 펼쳐진 목록 항목도 함께 접는다
-  detailCloseBtn.addEventListener("click", () => {
-    listEl.querySelector(".active")?.classList.remove("active");
-    infoWindow?.close();
-    closeDetail();
-  });
+  // 상세 패널 ✕: 펼쳐진 목록 항목과 지도 이름표도 함께 닫는다
+  detailCloseBtn.addEventListener("click", deselectPlace);
 
   // 즐겨찾기 공유
   shareBtn.addEventListener("click", copyShareLink);
@@ -721,6 +860,10 @@ function setupControls() {
   kakao.maps.event.addListener(map, "dragend", () => {
     researchBtn.hidden = false;
   });
+
+  // 지도 빈 곳을 누르면 묶음 팝업 닫기
+  // (마커·묶음 마커·팝업 자체를 누른 건 지도 클릭으로 전달되지 않음)
+  kakao.maps.event.addListener(map, "click", hideGroupPopup);
 
   researchBtn.addEventListener("click", () => {
     const c = map.getCenter();
