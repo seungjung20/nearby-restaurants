@@ -270,13 +270,26 @@ function randomItem(array) {
   return array[Math.floor(Math.random() * array.length)];
 }
 
+// "음식점 > 술집 > 호프,요리주점" 처럼 분류의 두 번째 칸이 '술집'이면 술집
+// (호프, 이자카야, 포차, 와인바 등이 모두 이 아래에 있다)
+function isBar(place) {
+  return place.category_name.split(" > ")[1] === "술집";
+}
+
 async function pickRandomPlace() {
   // 지금 보고 있는 목록을 기억해 둔다. 룰렛이 도는 사이 다시 검색되면 이 목록은 낡은 것이 된다.
   const list = shownPlaces;
-  if (list.length === 0) return;
+
+  // 메뉴 추천이므로 술집은 후보에서 뺀다 (목록과 지도에는 그대로 보임)
+  const meals = list.filter(({ place }) => !isBar(place));
+  if (meals.length === 0) {
+    pickResultEl.hidden = false;
+    pickResultEl.textContent = "추천할 식당이 없어요. 반경을 넓히거나 다른 종류를 골라보세요.";
+    return;
+  }
 
   // 지금 펼쳐져 있는 곳은 후보에서 빼서, 연속으로 같은 곳이 뽑히지 않게 한다
-  const candidates = list.length > 1 ? list.filter(({ item }) => !item.classList.contains("active")) : list;
+  const candidates = meals.length > 1 ? meals.filter(({ item }) => !item.classList.contains("active")) : meals;
   const picked = randomItem(candidates);
 
   pickBtn.disabled = true;
@@ -292,7 +305,7 @@ async function pickRandomPlace() {
       pickResultEl.classList.remove("spinning");
       return;
     }
-    pickResultEl.textContent = randomItem(list).place.place_name;
+    pickResultEl.textContent = randomItem(meals).place.place_name; // 룰렛에도 술집은 안 나오게
     await sleep(40 + i * i * 2); // 40ms → 약 400ms 로 점점 느려짐
   }
   if (shownPlaces !== list) {
