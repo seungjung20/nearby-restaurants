@@ -51,6 +51,7 @@ const FILTERS = [
   { label: "일식", keyword: "일식" },
   { label: "양식", keyword: "양식" },
   { label: "분식", keyword: "분식" },
+  { label: "도시락", keyword: "도시락" },
   { label: "치킨", keyword: "치킨" },
   { label: "햄버거", keyword: "햄버거", extraKeywords: ["써브웨이"], match: isBurger },
   { label: "카페", category: "CE7" },
