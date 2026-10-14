@@ -23,6 +23,78 @@ header {
 
 header h1 { margin: 0; font-size: 1.2rem; }
 
+header .title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 제목 옆 버전 번호: 작고 눈에 덜 띄게 */
+#version-btn {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+  color: #444;
+  font-size: 0.75rem;
+}
+
+#version-btn:hover { background: rgba(0, 0, 0, 0.15); }
+
+/* ─── 업데이트 내역 창 ─── */
+#changelog-dialog {
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(600px, calc(100vh - 64px));
+  padding: 0; /* 안쪽 여백은 내용 쪽에 줘야 '창 바깥 클릭'과 구분된다 */
+  border: none;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+#changelog-dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
+
+.changelog-header {
+  position: sticky; /* 내역을 스크롤해도 제목과 닫기 버튼은 위에 남는다 */
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #eee;
+  background: #fff;
+}
+
+.changelog-header form { margin: 0; }
+
+.changelog-header button {
+  padding: 4px 8px;
+  background: none;
+  color: #555;
+}
+
+#changelog-list { padding: 4px 16px 16px; }
+
+.changelog-entry h3 { margin: 14px 0 6px; font-size: 0.95rem; }
+
+.changelog-entry h3 .muted { font-weight: normal; font-size: 0.8rem; }
+
+/* 지난번에 본 뒤로 새로 생긴 버전 표시 */
+.new-badge {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e53935;
+  color: #fff;
+  font-size: 0.7rem;
+  vertical-align: middle;
+}
+
+.changelog-entry ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
 button {
   padding: 8px 14px;
   border: none;

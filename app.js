@@ -1007,9 +1007,73 @@ async function handleLocate() {
   locateBtn.disabled = false;
 }
 
+// ─── 7. 업데이트 내역 (changelog.js의 CHANGELOG) ────────────────
+
+// 이 브라우저에서 마지막으로 본 버전.
+// - 예전 버전을 본 사람이 다시 오면 → 내역 창을 한 번 자동으로 열고, 그 뒤로 생긴 항목에 NEW 표시
+// - 처음 온 사람(기록 없음)이면 → 창은 띄우지 않고 지금 버전만 기록 (다음 버전부터 안내)
+const SEEN_VERSION_KEY = "lunch-finder:seen-version";
+
+function readSeenVersion() {
+  try {
+    return localStorage.getItem(SEEN_VERSION_KEY);
+  } catch {
+    return null; // 저장 공간을 못 쓰면 처음 온 사람으로 친다 (매번 창이 뜨지 않도록)
+  }
+}
+
+function saveSeenVersion(version) {
+  try {
+    localStorage.setItem(SEEN_VERSION_KEY, version);
+  } catch {
+    // 저장 못 하면 다음에도 처음 온 사람으로 보일 뿐이라 무시
+  }
+}
+
+// newCount: 맨 위에서부터 이 개수만큼의 버전에 NEW 표시
+function renderChangelog(newCount) {
+  document.getElementById("changelog-list").innerHTML = CHANGELOG.map(
+    ({ version, date, items }, i) => `
+      <section class="changelog-entry">
+        <h3>
+          v${escapeHtml(version)} <span class="muted">${escapeHtml(date)}</span>
+          ${i < newCount ? '<span class="new-badge">NEW</span>' : ""}
+        </h3>
+        <ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </section>`
+  ).join("");
+}
+
+function setupChangelog() {
+  const versionBtn = document.getElementById("version-btn");
+  const dialog = document.getElementById("changelog-dialog");
+  const current = CHANGELOG[0].version; // 맨 위가 최신
+  versionBtn.textContent = `v${current}`;
+
+  // 내역은 최신순이므로, 마지막으로 본 버전의 위치 = 그 위에 쌓인 새 버전 개수
+  // (기록이 없거나 목록에 없는 버전이면 -1 → 처음 온 사람으로 취급)
+  const seenIndex = CHANGELOG.findIndex((entry) => entry.version === readSeenVersion());
+  saveSeenVersion(current);
+
+  const open = (newCount) => {
+    renderChangelog(newCount);
+    dialog.showModal(); // 창 바깥은 어둡게 덮이고, Esc로 닫힌다
+    dialog.scrollTop = 0;
+  };
+
+  if (seenIndex > 0) open(seenIndex); // 예전 버전을 본 사람: 이번 한 번만 자동으로
+  versionBtn.addEventListener("click", () => open(0)); // 직접 열 때는 NEW 표시 없이
+
+  // 창 바깥(어두운 부분)을 눌러도 닫기: 바깥을 누르면 클릭 대상이 dialog 자신이 된다
+  dialog.addEventListener("click", (e) => {
+    if (e.target === dialog) dialog.close();
+  });
+}
+
 // ─── 시작 ──────────────────────────────────────────────────────
 
 async function init() {
+  setupChangelog(); // 지도와 상관없으므로 카카오 키·SDK 확인보다 먼저
   // 파일을 더블클릭해서 file:// 로 열면 출처(Origin)가 없어 카카오 API가 401로 거부한다
   if (location.protocol === "file:") {
     setStatus("파일을 직접 열면 동작하지 않습니다. 로컬 서버를 실행한 뒤 http://localhost:5173 으로 접속하세요.");

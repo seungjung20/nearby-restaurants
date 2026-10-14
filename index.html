@@ -8,9 +8,23 @@
 </head>
 <body>
   <header>
-    <h1>점심 메뉴 찾기</h1>
+    <div class="title">
+      <h1>점심 메뉴 찾기</h1>
+      <!-- 버전 번호 (누르면 업데이트 내역). 예전 버전을 본 사람이 다시 오면 내역 창이 한 번 자동으로 열린다 -->
+      <button id="version-btn" aria-label="업데이트 내역 보기"></button>
+    </div>
     <button id="locate-btn">내 위치 찾기</button>
   </header>
+
+  <!-- 업데이트 내역 창: <dialog>는 브라우저가 기본으로 제공하는 팝업 (showModal()로 연다) -->
+  <dialog id="changelog-dialog" aria-labelledby="changelog-title">
+    <div class="changelog-header">
+      <strong id="changelog-title">업데이트 내역</strong>
+      <!-- method="dialog" 폼의 버튼을 누르면 창이 닫힌다 -->
+      <form method="dialog"><button aria-label="닫기">✕</button></form>
+    </div>
+    <div id="changelog-list"></div>
+  </dialog>
 
   <!-- 왼쪽: 검색 조건 + 목록 / 오른쪽: 지도 -->
   <main>
@@ -29,7 +43,7 @@
       <div id="controls">
         <!-- form으로 감싸면 입력창에서 Enter를 눌러도 submit 이벤트로 검색된다 -->
         <form id="search-form" role="search">
-          <input id="search-input" type="search" placeholder="가게 이름이나 메뉴 검색 (예: 한솥, 쌀국수)" aria-label="가게 이름이나 메뉴 검색" />
+          <input id="search-input" type="search" placeholder="가게 이름이나 메뉴 검색" aria-label="가게 이름이나 메뉴 검색" />
           <button type="submit">검색</button>
         </form>
         <!-- 종류 버튼들은 app.js의 FILTERS 목록으로 만들어 넣는다 -->
@@ -93,6 +107,7 @@
 
   <!-- 순서 중요: 설정(키) → 앱 코드. 카카오 SDK는 app.js가 키를 읽은 뒤 동적으로 불러옵니다. -->
   <script src="config.js"></script>
+  <script src="changelog.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
