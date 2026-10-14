@@ -7,6 +7,8 @@ const mapEl = document.getElementById("map");
 const listEl = document.getElementById("place-list");
 const radiusControl = document.getElementById("radius-control");
 const chipsEl = document.getElementById("filter-chips");
+const searchForm = document.getElementById("search-form");
+const searchInput = document.getElementById("search-input");
 const researchBtn = document.getElementById("research-btn");
 const pickBtn = document.getElementById("pick-btn");
 const pickResultEl = document.getElementById("pick-result");
@@ -44,6 +46,7 @@ function isBurger(place) {
 // - keyword:  음식점(FD6) 안에서 키워드 검색 → 받은 뒤 분류 이름에 keyword가 있는 것만 남긴다
 // - match:    (선택) 분류 이름만으로 거를 수 없을 때 쓰는 전용 판별 함수
 // - extraKeywords: (선택) 함께 검색해서 결과를 합칠 추가 키워드
+// - groupCodes: (선택) 키워드 검색을 제한할 카테고리들 (없으면 음식점 FD6만)
 const FILTERS = [
   { label: "전체", category: "FD6" },
   { label: "한식", keyword: "한식" },
@@ -57,6 +60,13 @@ const FILTERS = [
   { label: "카페", category: "CE7" },
   { label: "★ 즐겨찾기", favorites: true }, // 검색하지 않고 저장해 둔 곳을 보여준다
 ];
+
+// 검색창에 입력한 단어로 만드는 임시 필터 (FILTERS 목록에는 없고, 검색할 때마다 새로 만든다)
+// - 음식점과 카페를 함께 찾는다 ('스타벅스' 같은 검색도 되도록)
+// - 메뉴 이름("쌀국수")으로도 찾을 수 있게 분류 이름으로 거르지 않는다 (카카오 결과를 그대로 믿음)
+function queryFilter(query) {
+  return { label: `'${query}'`, keyword: query, groupCodes: ["FD6", "CE7"], match: () => true };
+}
 
 const MAX_RESULTS = 45; // 카카오 장소 검색이 주는 최대 개수 (15개 × 3페이지)
 
@@ -293,16 +303,19 @@ async function searchPlaces({ lat, lng }, radius, filter) {
     );
   }
 
-  // 키워드 검색 + 음식점 카테고리로 제한.
+  // 키워드 검색 + 음식점 카테고리로 제한 (groupCodes가 있으면 그 카테고리들).
   // extraKeywords가 있으면 그 키워드로도 동시에 검색해서 결과를 합친다.
   // (예: '햄버거'로 검색하면 써브웨이가 안 나오므로 '써브웨이'로도 검색)
+  // 카카오 키워드 검색은 카테고리를 하나만 받으므로, 카테고리가 여럿이면 카테고리마다 따로 검색한다.
   const keywords = [filter.keyword, ...(filter.extraKeywords ?? [])];
+  const groupCodes = filter.groupCodes ?? ["FD6"];
+  const jobs = keywords.flatMap((keyword) => groupCodes.map((code) => ({ keyword, code })));
   const lists = await Promise.all(
-    keywords.map((keyword) => {
+    jobs.map(({ keyword, code }) => {
       const places = new kakao.maps.services.Places(); // 검색마다 따로 만들어 서로 섞이지 않게
       return fetchAllPages(
-        (cb) => places.keywordSearch(keyword, cb, { ...options, category_group_code: "FD6" }),
-        { lat, lng, keyword }
+        (cb) => places.keywordSearch(keyword, cb, { ...options, category_group_code: code }),
+        { lat, lng, keyword, code }
       );
     })
   );
@@ -514,6 +527,7 @@ function enterSharedView(list) {
   sharedPlaces = list;
   search.filter = SHARED_FILTER;
   chipsEl.querySelector(".active")?.classList.remove("active"); // 어떤 필터 칩도 선택 안 된 상태
+  searchInput.value = "";
   sharedCountEl.textContent = list.length;
   sharedMsgEl.hidden = true;
   importBtn.disabled = false;
@@ -872,6 +886,7 @@ function renderFilterChips() {
     chip.addEventListener("click", () => {
       chipsEl.querySelector(".active")?.classList.remove("active");
       chip.classList.add("active");
+      searchInput.value = ""; // 종류 버튼으로 돌아가면 직접 검색어는 지운다
       search.filter = filter;
       runSearch();
     });
@@ -880,8 +895,20 @@ function renderFilterChips() {
   });
 }
 
+// 직접 검색: 입력한 단어로 카카오에 새로 검색한다 (종류 버튼 선택은 해제)
+function handleQuerySubmit(e) {
+  e.preventDefault(); // form의 기본 동작(페이지를 새로 불러오며 제출)을 막는다
+  const query = searchInput.value.trim();
+  if (!query) return;
+
+  chipsEl.querySelector(".active")?.classList.remove("active");
+  search.filter = queryFilter(query);
+  runSearch();
+}
+
 function setupControls() {
   renderFilterChips();
+  searchForm.addEventListener("submit", handleQuerySubmit);
   pickBtn.addEventListener("click", pickRandomPlace);
 
   // 상세 패널 ✕: 펼쳐진 목록 항목과 지도 이름표도 함께 닫는다

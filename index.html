@@ -25,8 +25,13 @@
         <p id="shared-msg" hidden></p>
       </div>
 
-      <!-- 검색 조건: 종류 (위에 고정) -->
+      <!-- 검색 조건: 직접 검색 + 종류 (위에 고정) -->
       <div id="controls">
+        <!-- form으로 감싸면 입력창에서 Enter를 눌러도 submit 이벤트로 검색된다 -->
+        <form id="search-form" role="search">
+          <input id="search-input" type="search" placeholder="가게 이름이나 메뉴 검색 (예: 한솥, 쌀국수)" aria-label="가게 이름이나 메뉴 검색" />
+          <button type="submit">검색</button>
+        </form>
         <!-- 종류 버튼들은 app.js의 FILTERS 목록으로 만들어 넣는다 -->
         <div id="filter-chips"></div>
       </div>

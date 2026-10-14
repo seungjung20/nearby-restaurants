@@ -66,6 +66,23 @@ main {
   padding: 14px 16px 10px;
 }
 
+/* 직접 검색: 입력창이 남는 폭을 모두 쓰고 버튼은 오른쪽에 */
+#search-form {
+  display: flex;
+  gap: 6px;
+}
+
+#search-input {
+  flex: 1;
+  min-width: 0; /* flex 안의 input이 기본 폭 때문에 넘치지 않도록 */
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+#search-input:focus { outline: 2px solid #fee500; border-color: #222; }
+
 /* 사이드바 폭 안에서 종류 버튼을 여러 줄로 감싸기 */
 #filter-chips {
   display: flex;
